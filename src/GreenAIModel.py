@@ -88,18 +88,34 @@ def get_eco_route(origin, dest, ors_key):
     try:
         origin_fmt = [origin[1], origin[0]]           # [lon, lat]
         dest_fmt   = [dest[1],   dest[0]]
-        headers = {"Authorization": ors_key, "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {ors_key}", "Content-Type": "application/json"}
+        
+        # Add debug logging
+        print(f"Attempting route calculation from {origin} to {dest}")
+        print(f"Formatted coordinates: {origin_fmt} to {dest_fmt}")
+        
         payload = {"coordinates": [origin_fmt, dest_fmt], "profile": "driving-car"}
+        
+        # Debug the request
+        print(f"Sending request to ORS API with payload: {payload}")
+        
         r = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson",
                           headers=headers, json=payload)
+        
+        # Enhanced error logging
         if r.status_code != 200:
-            print("ORS error:", r.status_code, r.text)
+            print(f"ORS error: Status code {r.status_code}")
+            print(f"Response text: {r.text}")
             return None
 
+        # Debug the response
+        print("Successfully received route data from ORS API")
+        
         feat = r.json()['features'][0]
         coords = feat['geometry']['coordinates']
         props  = feat['properties']
-        return {
+        
+        result = {
             "distance_km": props['segments'][0]['distance'] / 1000,
             "duration_minutes": round(props['segments'][0]['duration'] / 60),
             "coordinates": [[c[1], c[0]] for c in coords],    # lat, lon for Leaflet
@@ -107,10 +123,15 @@ def get_eco_route(origin, dest, ors_key):
                 [step['instruction'] for seg in props['segments'] for step in seg.get('steps', [])
                  if 'instruction' in step]
         }
+        
+        print(f"Route calculated: {result['distance_km']} km, {result['duration_minutes']} minutes")
+        return result
+        
     except Exception as e:
-        print("get_eco_route:", e)
-    return None
-
+        print(f"get_eco_route error: {e}")
+        import traceback
+        traceback.print_exc()  # Print the full stack trace for better debugging
+        return None
 
 def simulate_optimized_route(route):
     return {
@@ -140,14 +161,19 @@ def generate_openai_prompt(route, energy, emissions, wx_orig, wx_dest, vehicle):
 
 def get_openai_recommendation(prompt):
     try:
-        r = openai.ChatCompletion.create(
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        response = client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "system", "content": "You are an AI assistant that provides route and energy optimization advice."},
-                      {"role": "user",   "content": prompt}],
+            messages=[
+                {"role": "system", "content": "You are an AI assistant that provides route and energy optimization advice."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=200,
             temperature=0.7,
         )
-        return r['choices'][0]['message']['content'].strip()
+        return response.choices[0].message.content.strip()
     except Exception as e:
         print("OpenAI error:", e)
         return "Failed to generate recommendation."
